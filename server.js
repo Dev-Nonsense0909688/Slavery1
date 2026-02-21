@@ -4,66 +4,74 @@ const WebSocket = require("ws");
 const PORT = process.env.PORT || 8765;
 
 let client = null;
-let name = "client";
-let path = "~";
-let lastOutput = "no output";
+let lastMessage = "no data";
 
-const server = http.createServer((req,res)=>{
+// ---------- HTTP SERVER ----------
+const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
-    // health check
+    // health check (keeps Render alive)
     if (url.pathname === "/") {
-        res.end("alive");
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("ok");
         return;
     }
 
-    // send command
-    if (url.pathname === "/cmd") {
+    // send message to connected socket
+    if (url.pathname === "/send") {
         if (!client || client.readyState !== WebSocket.OPEN) {
             res.end("no client");
             return;
         }
 
-        const cmd = url.searchParams.get("c") || "";
-        client.send(cmd);
+        const msg = url.searchParams.get("m") || "";
+        client.send(msg);
         res.end("sent");
         return;
     }
 
-    // read last reply
-    if (url.pathname === "/out") {
-        res.end(lastOutput);
+    // read last message from socket
+    if (url.pathname === "/recv") {
+        res.end(lastMessage);
         return;
     }
 
-    res.end("unknown");
+    res.writeHead(404);
+    res.end("not found");
 });
 
-const wss = new WebSocket.Server({ server });
 
-wss.on("connection", ws => {
-    console.log("client connected");
+// ---------- WEBSOCKET ----------
+const wss = new WebSocket.Server({ noServer: true });
+
+// handle upgrade manually (fixes 426 errors)
+server.on("upgrade", (req, socket, head) => {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+    });
+});
+
+wss.on("connection", (ws) => {
+    console.log("socket connected");
     client = ws;
 
-    ws.once("message", data => {
-        [path, name] = data.toString().split("|",2);
+    ws.on("message", (data) => {
+        lastMessage = data.toString();
+        console.log("msg:", lastMessage.slice(0,80));
     });
 
-    ws.on("message", msg => {
-        msg = msg.toString();
-
-        if (msg.includes("|")) {
-            [path,name] = msg.split("|",2);
-            return;
-        }
-
-        lastOutput = msg;
+    ws.on("close", () => {
+        console.log("socket closed");
+        if (client === ws) client = null;
     });
 
-    ws.on("close", ()=> {
-        console.log("client left");
-        client = null;
+    ws.on("error", () => {
+        if (client === ws) client = null;
     });
 });
 
-server.listen(PORT,"0.0.0.0",()=>console.log("running on",PORT));
+
+// ---------- START ----------
+server.listen(PORT, "0.0.0.0", () =>
+    console.log("running on port", PORT)
+);
