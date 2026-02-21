@@ -58,7 +58,6 @@ wss.on("connection", ws => {
         }
 
         lastOutput = msg;
-        console.log(`[${name}] ${msg.slice(0,80)}`);
     });
 
     ws.on("close", ()=> {
