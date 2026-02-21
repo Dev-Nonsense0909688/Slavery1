@@ -1,7 +1,7 @@
 const WebSocket = require("ws");
 const readline = require("readline");
 
-const wss = new WebSocket.Server({ port: 8765 });
+const wss = new WebSocket.Server({ host: "0.0.0.0", port: 8765 });
 
 console.log("Running on ws://localhost:8765");
 
