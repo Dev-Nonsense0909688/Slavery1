@@ -1,6 +1,7 @@
 const http = require("http");
 const WebSocket = require("ws");
 
+const TOKEN = process.env.TOKEN || "change_me_123";
 const PORT = process.env.PORT || 8765;
 
 let client = null;
@@ -19,16 +20,23 @@ const server = http.createServer((req, res) => {
 
     // send message to connected socket
     if (url.pathname === "/send") {
-        if (!client || client.readyState !== WebSocket.OPEN) {
-            res.end("no client");
-            return;
-        }
-
-        const msg = url.searchParams.get("m") || "";
-        client.send(msg);
-        res.end("sent");
+    const token = url.searchParams.get("t");
+    if (token !== TOKEN) {
+        res.writeHead(403);
+        res.end("forbidden");
         return;
     }
+
+    if (!client || client.readyState !== WebSocket.OPEN) {
+        res.end("no client");
+        return;
+    }
+
+    const msg = url.searchParams.get("m") || "";
+    client.send(msg);
+    res.end("sent");
+    return;
+}
 
     // read last message from socket
     if (url.pathname === "/recv") {
@@ -52,20 +60,25 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 wss.on("connection", (ws) => {
-    console.log("socket connected");
-    client = ws;
+    let authed = false;
+
+    ws.once("message", (data) => {
+        if (data.toString() !== TOKEN) {
+            ws.close();
+            return;
+        }
+
+        authed = true;
+        client = ws;
+        console.log("client authenticated");
+    });
 
     ws.on("message", (data) => {
+        if (!authed) return;
         lastMessage = data.toString();
-        console.log("msg:", lastMessage.slice(0,80));
     });
 
     ws.on("close", () => {
-        console.log("socket closed");
-        if (client === ws) client = null;
-    });
-
-    ws.on("error", () => {
         if (client === ws) client = null;
     });
 });
